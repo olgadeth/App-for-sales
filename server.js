@@ -29,9 +29,21 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS files (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    mimetype TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    data BLOB NOT NULL,
+    uploaded_at TEXT NOT NULL
+  );
+`);
+
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "15mb" })); // the facility list + visits can be a fairly large JSON blob
+// 20mb covers the facility list/visits JSON blob AND base64-encoded file uploads (up to ~15MB files)
+app.use(express.json({ limit: "20mb" }));
 
 /* ---------------- auth ---------------- */
 function signToken() {
@@ -76,6 +88,40 @@ app.put("/api/state", requireAuth, (req, res) => {
     ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
   `).run(json, now);
   res.json({ ok: true, updatedAt: now });
+});
+
+/* ---------------- file attachments (PDF quotes/orders, photos, etc.) ----------------
+   Uploaded as base64 JSON (simple, no extra libraries needed) and stored as raw
+   bytes in SQLite. Quotations/orders in the main state only keep a small
+   { id, filename, mimetype, size } reference, not the file itself — that keeps
+   the main CRM data blob fast to save on every edit. */
+app.post("/api/files", requireAuth, (req, res) => {
+  const { filename, mimetype, dataBase64 } = req.body || {};
+  if (!filename || !mimetype || !dataBase64) {
+    return res.status(400).json({ error: "Missing filename, mimetype, or file data" });
+  }
+  const buffer = Buffer.from(dataBase64, "base64");
+  if (buffer.length > 15 * 1024 * 1024) {
+    return res.status(413).json({ error: "File too large (max 15MB)" });
+  }
+  const id = "f_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  db.prepare(`
+    INSERT INTO files (id, filename, mimetype, size, data, uploaded_at) VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, filename, mimetype, buffer.length, buffer, new Date().toISOString());
+  res.json({ id, filename, mimetype, size: buffer.length });
+});
+
+app.get("/api/files/:id", requireAuth, (req, res) => {
+  const row = db.prepare("SELECT filename, mimetype, data FROM files WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "File not found" });
+  res.setHeader("Content-Type", row.mimetype);
+  res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(row.filename)}"`);
+  res.send(row.data);
+});
+
+app.delete("/api/files/:id", requireAuth, (req, res) => {
+  db.prepare("DELETE FROM files WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
