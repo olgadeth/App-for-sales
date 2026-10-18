@@ -1,0 +1,16 @@
+{
+  "name": "fieldsales-crm-backend",
+  "version": "1.0.0",
+  "description": "Backend for FieldSales Sharjah CRM - stores CRM data in a real database instead of browser localStorage",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "jsonwebtoken": "^9.0.2",
+    "dotenv": "^16.4.5"
+  }
+}
